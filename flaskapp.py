@@ -43,6 +43,7 @@ def token_required(f):
     return decorated
 
 @app.route('/run', methods=['POST'])
+@token_required
 def run_code():
     data = request.get_json()
     user_code = data.get('userCode')
