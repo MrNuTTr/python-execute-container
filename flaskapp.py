@@ -1,8 +1,12 @@
+from functools import wraps
 import unittest
 import io
 import sys
+import os
 from flask import Flask, request
 app = Flask(__name__)
+
+AUTH_TOKEN = os.getenv('X_AUTH_TOKEN')
 
 def run_code_and_check_output(user_code, test_code):
     stdout = io.StringIO()
@@ -23,6 +27,15 @@ def run_code_and_check_output(user_code, test_code):
     sys.stderr = sys.__stderr__
 
     return result.wasSuccessful(), stdout.getvalue(), stderr.getvalue()
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('X-Auth-Token') # token is in the headers
+        if not token or token != AUTH_TOKEN:
+            return {'message': 'Token is missing or invalid'}, 403
+        return f(*args, **kwargs)
+    return decorated
 
 @app.route('/run', methods=['POST'])
 def run_code():
