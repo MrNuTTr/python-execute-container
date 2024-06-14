@@ -1,0 +1,47 @@
+name: Trigger auto deployment for intuicode-code-execute
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ main ]
+    paths:
+    - '**'
+    - '.github/workflows/intuicode-code-execute-AutoDeployTrigger-90b760a2-98b1-4f2f-84ab-2fe77105d4ea.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:      
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions: 
+      id-token: write #This is required for requesting the OIDC JWT Token
+      contents: read #Required when GH token is used to authenticate with private repo
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.INTUICODECODEEXECUTE_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.INTUICODECODEEXECUTE_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.INTUICODECODEEXECUTE_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }} 
+          registryUrl: intuicodecontainerregistry.azurecr.io
+          registryUsername: ${{ secrets.INTUICODECODEEXECUTE_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.INTUICODECODEEXECUTE_REGISTRY_PASSWORD }}
+          containerAppName: intuicode-code-execute
+          resourceGroup: Intuicode
+          imageToBuild: intuicodecontainerregistry.azurecr.io/intuicode-code-execute:${{ github.sha }}
+          _buildArgumentsKey_: |
+            _buildArgumentsValues_
+
+
