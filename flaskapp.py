@@ -31,9 +31,14 @@ def run_code_and_check_output(user_code, test_code):
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get('X-Auth-Token') # token is in the headers
+        if AUTH_TOKEN == None:
+            return f(*args, **kwargs)
+
+        token = request.headers.get('X-Auth-Token')
+
         if not token or token != AUTH_TOKEN:
             return {'message': 'Token is missing or invalid'}, 403
+        
         return f(*args, **kwargs)
     return decorated
 
@@ -52,4 +57,4 @@ def run_code():
     }
 
 if __name__ == '__main__':
-    app.run()
+    app.run(port=8000)
