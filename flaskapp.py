@@ -44,3 +44,4 @@ def run_code():
         'stderr': stderr
     }
 
+app.run()
