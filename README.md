@@ -1,2 +1,2 @@
 # Python Container
-This is the container to run python code. It's a simple flask app.
+This is the container to run python code for Intuicode. It's a simple flask app.
