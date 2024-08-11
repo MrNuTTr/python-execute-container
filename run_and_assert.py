@@ -4,25 +4,30 @@ import traceback
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 
-def run_user_code(user_code, queue):
+def run_user_code(user_code, setup_code, queue):
     try:
         # Redirect stdout and stderr
         stdout, stderr = StringIO(), StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
             # Create a separate namespace for user code execution
             user_namespace = {}
+            if setup_code:
+                exec(setup_code, user_namespace)
             exec(user_code, user_namespace)
         queue.put({'success': True, 'reason': 'success', 'stdout': stdout.getvalue(), 'stderr': stderr.getvalue(), 'variables': user_namespace})
     except BaseException as e:  # Catch all exceptions
         tb_str = traceback.format_exception(type(e), e, e.__traceback__)
         queue.put({'success': False, 'reason': 'error', 'stdout': stdout.getvalue(), 'stderr': "".join(tb_str)})
 
-def execute_with_timeout(user_code, timeout_seconds):
+def execute_with_timeout(user_code, setup_code, timeout_seconds):
+    if timeout_seconds > 10:
+        timeout_seconds = 10
+
     # Create a Queue object to manage shared state
     queue = multiprocessing.Queue()
 
     # Create a separate process to run the user code
-    process = multiprocessing.Process(target=run_user_code, args=(user_code, queue))
+    process = multiprocessing.Process(target=run_user_code, args=(user_code, setup_code, queue))
     process.start()
 
     # Wait for the process to complete or until the timeout
@@ -34,37 +39,58 @@ def execute_with_timeout(user_code, timeout_seconds):
 
     return queue.get()
 
-def assert_user_code(assert_code, user_code, variables, stdout):
+def assert_user_code(assert_code, user_code, variables, stdout, queue, index):
     # Create a separate namespace for assert function execution
-    assert_namespace = {'user_code': user_code, 'variables': variables, 'stdout': stdout, 'assert_passed': False, 'help_message': ''}
+    assert_namespace = {'user_code': user_code, 'variables': variables, 'stdout': stdout}
     try:
         exec(assert_code, assert_namespace)
-    except AssertionError as e:
-        assert_namespace['assert_passed'] = False
-        assert_namespace['help_message'] = str(e)
-    return assert_namespace['assert_passed'], assert_namespace['help_message']
+        # Get the assert function and call it with the required arguments
+        assert_function = assert_namespace['assert_user_code']
+        assert_passed, help_message = assert_function(user_code, variables, stdout)
+    except Exception as e:  # Catch all exceptions
+        # If an error occurs, return 'testing-error'
+        queue.put((index, False, 'Test has an unhandled exception. This is a problem with the test.'))
+    else:
+        # If no error occurs, return the result of the assert function
+        queue.put((index, assert_passed, help_message))
 
-def run_and_assert_code(user_code, test_code, timeout_seconds):
-    code_result = execute_with_timeout(user_code, timeout_seconds)
 
-    if code_result['success'] == False:
-        return {
-            'success': False,
-            'reason': code_result['reason'],
-            'helpMessage': '',
-            'stdout': code_result['stdout'],
-            'stderr': code_result['stderr']
+
+def run_and_assert_code(user_code, test_cases):
+    manager = multiprocessing.Manager()
+    queue = manager.Queue()
+    processes = []
+
+    for index, test_case in enumerate(test_cases):
+        code_result = execute_with_timeout(user_code, test_case['setupCode'], test_case['timeoutSeconds'])
+
+        if code_result['success'] == False:
+            queue.put((index, False, code_result['reason']))
+            break
+
+        process = multiprocessing.Process(target=assert_user_code, args=(test_case['testCode'], user_code, code_result['variables'], code_result['stdout'], queue, index))
+        processes.append(process)
+        process.start()
+
+    for process in processes:
+        process.join()
+
+    test_results = [None] * len(test_cases)
+    while not queue.empty():
+        index, assert_passed, help_message = queue.get()
+        test_results[index] = {
+            'passed': assert_passed,
+            'message': help_message
         }
-    
-    assert_passed, help_message = assert_user_code(test_code, user_code, code_result['variables'], code_result['stdout'])
 
     return {
-        'success': assert_passed,
-        'reason': 'success' if assert_passed else 'assert-failed',
-        'helpMessage': help_message,
+        'success': all(result['passed'] for result in test_results),
+        'reason': 'success' if all(result['passed'] for result in test_results) else 'test-failed',
+        'testResults': test_results,
         'stdout': code_result['stdout'],
         'stderr': code_result['stderr']
     }
+
 
 '''
 How to write an Assert Function:
@@ -76,13 +102,23 @@ variables is a dictionary of all the variables after execution (including system
 stdout is the raw standard output generated by the user code after execution
 
 You should return a tuple of bool, str. The bool being whether your assertion was successful or not.
-The str is an optional help_message if there's a specific failure case where you think extra explination is required.
-If you do not wish to provide a help_message, return an empty string instead.
-Returning is done by assigning a variable for 'assert_passed' and 'help_message'. If you set these and wish to stop your assertion early, use an empty return.
+The str is an optional error_message if there's a specific failure case where you think extra explination is required.
+If you do not wish to provide a error_message, return an empty string instead.
+Returning is done by assigning a variable for 'assert_passed' and 'error_message'. If you set these and wish to stop your assertion early, use an empty return.
 
 Example:
 assert stdout == 'hello world\\n', "You should be printing the phrase 'hello world' exactly. Case sensitive."
 assert 'hello' in variables and variables['hello'] == 'hello world', "variable 'hello' should have the value 'hello world'. Everything is case sensitive."
 assert_passed = True
-help_message = ''
+error_message = ''
+
+def assert_user_code(user_code, variables, stdout):
+    # Call the function and get the return value
+    return_value = variables['hello_world']
+    
+    # Check the return value
+    assert return_value == 'hello world', "The function hello_world() should return 'hello world'"
+    
+    # If the assert statement passes, return True and an optional success message
+    return True, "Test passed successfully"
 '''

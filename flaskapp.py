@@ -25,13 +25,9 @@ def token_required(f):
 def run_code():
     data = request.get_json()
     user_code = data.get('userCode')
-    test_code = data.get('testCode')
-    timeout = int(data.get('timeout_seconds') )
+    test_code = data.get('testCases')
 
-    if timeout > 10:
-        timeout = 10
-
-    result = run_and_assert_code(user_code, test_code, timeout)
+    result = run_and_assert_code(user_code, test_code)
 
     return result
 
